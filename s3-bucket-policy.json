@@ -1,0 +1,36 @@
+{
+    "Version": "2012-10-17",
+    "Id": "SSEAndSSLPolicy",
+    "Statement": [{
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::<AccountId2>:role/IamForCodeSeries-CodeBuildRole",
+                    "arn:aws:iam::<AccountId>:root",
+                    "arn:aws:iam::<AccountId2>:root",
+                    "arn:aws:iam::<AccountId2>:role/IamForCodeSeries-CodeDeployRole"
+                ]
+            },
+            "Action": [
+                "s3:Get*",
+                "s3:Put*"
+            ],
+            "Resource": "arn:aws:s3:::<S3BucketName>/*"
+        },
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::<AccountId2>:role/IamForCodeSeries-CodeBuildRole",
+                    "arn:aws:iam::<AccountId>:root",
+                    "arn:aws:iam::<AccountId2>:root",
+                    "arn:aws:iam::<AccountId2>:role/IamForCodeSeries-CodeDeployRole"
+                ]
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::<S3BucketName>"
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ECRRepositoryName:
+    Type: String
+    Default: <ECRRepositoryName>
+  SourceAccount:
+    Type: Number
+    Default: <AccountId>
+  KmsId:
+    Type: String
+    Default: <KmsKeyId>
+
+Resources:
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Build Docker Image.
+      EncryptionKey: !Sub arn:aws:kms:ap-northeast-1:${SourceAccount}:key/${KmsId}
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: True
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: ap-northeast-1
+          - Name: AWS_ACCOUNT_ID
+            Value: !Sub ${AWS::AccountId}
+          - Name: IMAGE_TAG
+            Value: latest
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref ECRRepositoryName
+      ServiceRole: !ImportValue CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+      SourceVersion: refs/heads/prod
+
+Outputs:
+  CodeBuildProject:
+    Value: !Ref CodeBuildProject
+    Export:
+      Name: CodeBuildProject

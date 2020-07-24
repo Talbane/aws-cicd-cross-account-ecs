@@ -1,0 +1,20 @@
+{
+    "family": "JavaHelloWorld",
+    "networkMode": "awsvpc",
+    "containerDefinitions": [{
+        "name": "<ECRRepositoryName>",
+        "image": "<IMAGE1_NAME>",
+        "portMappings": [{
+            "containerPort": 8080,
+            "hostPort": 8080,
+            "protocol": "tcp"
+        }],
+        "essential": true
+    }],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::<AccountId2>:role/ecsTaskExecutionRole"
+}

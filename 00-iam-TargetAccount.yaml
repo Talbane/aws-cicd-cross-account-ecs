@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  S3Bucket:
+    Type: String
+    Default: <S3BucketName>
+  SourceAccount:
+    Type: Number
+    Default: <AccountId>
+  KmsId:
+    Type: String
+    Default: <KmsKeyId>
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${SourceAccount}:root
+            Action: sts:AssumeRole
+        Version: "2012-10-17"
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildInline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - "logs:*"
+                  - "codebuild:*"
+                  - "codecommit:*"
+                  - "ecr:*"
+                  - "cloudformation:*"
+                  - "iam:*"
+                  - "lambda:*"
+                  - "ec2:*"
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketAcl"
+                  - "s3:GetBucketLocation"
+                Effect: Allow
+                Resource: !Sub arn:aws:s3:::${S3Bucket}/*
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey*
+                  - kms:Encrypt
+                  - kms:ReEncrypt*
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:ap-northeast-1:${SourceAccount}:key/${KmsId}
+
+  CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${SourceAccount}:root
+            Action: sts:AssumeRole
+        Version: "2012-10-17"
+      Path: /
+      Policies:
+        - PolicyName: CodeDeployInline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - ecs:DescribeServices
+                  - ecs:CreateTaskSet
+                  - ecs:UpdateServicePrimaryTaskSet
+                  - ecs:DeleteTaskSet
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:DescribeRules
+                  - elasticloadbalancing:ModifyRule
+                  - lambda:InvokeFunction
+                  - cloudwatch:DescribeAlarms
+                  - sns:Publish
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    iam:PassedToService:
+                      - ecs-tasks.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey*
+                  - kms:Encrypt
+                  - kms:ReEncrypt*
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:ap-northeast-1:${SourceAccount}:key/${KmsId}
+              - Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketAcl"
+                  - "s3:GetBucketLocation"
+                Effect: Allow
+                Resource: !Sub arn:aws:s3:::${S3Bucket}/*
+
+  CrossAccountPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CrossAccountPipelineRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${SourceAccount}:root
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: CrossAccountPipelineInline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject*"
+                  - "s3:GetBucketAcl"
+                  - "codecommit:ListBranches"
+                  - "codecommit:ListRepositories"
+                Effect: Allow
+                Resource: !Sub arn:aws:s3:::${S3Bucket}/*
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey*
+                  - kms:Encrypt
+                  - kms:ReEncrypt*
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:ap-northeast-1:${SourceAccount}:key/${KmsId}
+              - Effect: Allow
+                Action:
+                  - "ecs:*"
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCodeDeployFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - "*"
+                Resource: "*"
+                Effect: Allow
+Outputs:
+  CrossAccountPipelineRole:
+    Value: !GetAtt CrossAccountPipelineRole.Arn
+    Export:
+      Name: CrossAccountPipelineRole
+  CodeDeployRole:
+    Value: !GetAtt CodeDeployRole.Arn
+    Export:
+      Name: CodeDeployRole
+  CodeBuildRole:
+    Value: !GetAtt CodeBuildRole.Arn
+    Export:
+      Name: CodeBuildRole
+  LambdaExecutionRole:
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: LambdaExecutionRole

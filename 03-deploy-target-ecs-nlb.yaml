@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  SubnetId1:
+    Type: String
+    Default: subnet-
+  SubnetId2:
+    Type: String
+    Default: subnet-
+  VpcId:
+    Type: String
+    Default: vpc-
+  ECSClusterName:
+    Type: String
+    Default: Fargate-Cluster
+  ECRRepositoryName:
+    Type: String
+    Default: <ECRRepositoryName>
+  EcsTaskFamilyName:
+    Type: String
+    Default: JavaHelloWorld
+  EcsSecurityGroup:
+    Type: String
+    Default: sg-
+  NetworkLoadBalancerArn:
+    Type: String
+    Default: arn:aws:elasticloadbalancing:ap-northeast-1:<AccountId>:loadbalancer/***************
+
+Resources:
+  SecurityGroupNLB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SecurityGroup for httpd-bluegreen-alb
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8081
+          ToPort: 8081
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VpcId
+
+  TargetGroup1:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref VpcId
+  TargetGroup2:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  Listener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup1
+      LoadBalancerArn: !Ref NetworkLoadBalancerArn
+      Port: 8080
+      Protocol: TCP
+  Listener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup2
+      LoadBalancerArn: !Ref NetworkLoadBalancerArn
+      Port: 8081
+      Protocol: TCP
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ECSClusterName
+
+  ECSTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        - Name: !Ref ECRRepositoryName
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.ap-northeast-1.amazonaws.com/${ECRRepositoryName}
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+          Essential: true
+      Cpu: "256"
+      ExecutionRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole
+      Family: !Ref EcsTaskFamilyName
+      Memory: "512"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+
+  ECSService:
+    Type: AWS::ECS::Service
+    # DependsOn: NetworkLoadBalancer
+    Properties:
+      Cluster: !Ref ECSCluster
+      DeploymentController:
+        Type: CODE_DEPLOY
+      DesiredCount: 1
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Ref ECRRepositoryName
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          Subnets:
+            - !Ref SubnetId1
+            - !Ref SubnetId2
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref ECSTask
+
+Outputs:
+  Listener1:
+    Value: !Ref Listener1
+    Export:
+      Name: listener1-arn
+  TargetGroup1:
+    Value: !GetAtt TargetGroup1.TargetGroupName
+    Export:
+      Name: targetgroup1-name
+  TargetGroup2:
+    Value: !GetAtt TargetGroup2.TargetGroupName
+    Export:
+      Name: targetgroup2-name
+  ECSServiceName:
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: ecs-servicename
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Export:
+      Name: ecs-clustername

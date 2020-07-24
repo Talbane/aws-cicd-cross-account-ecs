@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ECRRepositoryName:
+    Type: String
+    Default: <ECRRepositoryName>
+  SourceAccount:
+    Type: Number
+    Default: <AccountId>
+  KmsId:
+    Type: String
+    Default: <KmsKeyId>
+
+Resources:
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Build Docker Image.
+      EncryptionKey: !Sub arn:aws:kms:ap-northeast-1:${SourceAccount}:key/${KmsId}
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: True
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: ap-northeast-1
+          - Name: AWS_ACCOUNT_ID
+            Value: !Sub ${AWS::AccountId}
+          - Name: IMAGE_TAG
+            Value: latest
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref ECRRepositoryName
+      ServiceRole: !ImportValue CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+      SourceVersion: refs/heads/prod
+
+  CodeDeploy:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ComputePlatform: ECS
+
+  LambdaCodeDeploy:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          def lambda_handler(event, context):
+            print(event)
+
+            if event['RequestType'] == 'Delete' or event['RequestType'] == 'Update' :
+                responseData = {}
+                responseData['Data'] = 'test'
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID")
+
+            client = boto3.client('codedeploy')
+            applicationName = event['ResourceProperties']['applicationName']
+            deploymentGroupName = event['ResourceProperties']['deploymentGroupName']
+            serviceRoleArn = event['ResourceProperties']['serviceRoleArn']
+            targetGroups1 = event['ResourceProperties']['targetGroups1']
+            targetGroups2 = event['ResourceProperties']['targetGroups2']
+            listenerArns = event['ResourceProperties']['listenerArns']
+            serviceName = event['ResourceProperties']['serviceName']
+            clusterName = event['ResourceProperties']['clusterName']
+
+            response = client.create_deployment_group(
+                applicationName=applicationName,
+                deploymentGroupName=deploymentGroupName,
+                serviceRoleArn=serviceRoleArn,
+                autoRollbackConfiguration={
+                    'enabled': True,
+                    'events': ['DEPLOYMENT_FAILURE']
+                },
+                deploymentStyle={
+                    'deploymentType': 'BLUE_GREEN',
+                    'deploymentOption': 'WITH_TRAFFIC_CONTROL'
+                },
+                blueGreenDeploymentConfiguration={
+                    'terminateBlueInstancesOnDeploymentSuccess': {
+                        'action': 'TERMINATE',
+                        'terminationWaitTimeInMinutes': 5
+                    },
+                    'deploymentReadyOption': {
+                        'actionOnTimeout': 'CONTINUE_DEPLOYMENT',
+                        'waitTimeInMinutes': 0
+                    }
+                },
+                loadBalancerInfo={
+                    'targetGroupPairInfoList': [
+                        {
+                            'targetGroups': [
+                                {
+                                    'name': targetGroups1
+                                },
+                                {
+                                    'name': targetGroups2
+                                }
+                            ],
+                            'prodTrafficRoute': {
+                                'listenerArns': [
+                                    listenerArns,
+                                ]
+                            }
+                        },
+                    ]
+                },
+                ecsServices=[
+                    {
+                        'serviceName': serviceName,
+                        'clusterName': clusterName
+                    },
+                ]
+            )
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, response, "CustomResourcePhysicalID")
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      Timeout: 30
+      Role: !ImportValue LambdaExecutionRole
+
+  CreateCodeDeployGroup:
+    Type: Custom::LambdaCallout
+    Properties:
+      ServiceToken: !GetAtt LambdaCodeDeploy.Arn
+      applicationName: !Ref CodeDeploy
+      deploymentGroupName: DeploymentGroup
+      serviceRoleArn: !ImportValue CodeDeployRole
+      targetGroups1: !ImportValue targetgroup1-name
+      targetGroups2: !ImportValue targetgroup2-name
+      listenerArns: !ImportValue listener1-arn
+      serviceName: !ImportValue ecs-servicename
+      clusterName: !ImportValue ecs-clustername
+
+Outputs:
+  CodeBuildProject:
+    Value: !Ref CodeBuildProject
+    Export:
+      Name: CodeBuildProject

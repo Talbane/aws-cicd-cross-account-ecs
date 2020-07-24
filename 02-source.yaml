@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  S3Bucket:
+    Type: String
+    Default: <S3BucketName>
+  CodeCommitSourceS3Key:
+    Type: String
+    Default: repository.zip
+  CodeCommitRepositoryName:
+    Type: String
+    Default: <ECRRepositoryName>
+  RepositoryBranch:
+    Type: String
+    Default: prod
+  CodeBuildProjectName:
+    Type: String
+    Default: CodeBuildProject-E4dZiaIhN8lT
+  ProdAccount:
+    Type: Number
+    Default: <AccountId>
+  KmsId:
+    Type: String
+    Default: <KmsKeyId>
+
+Resources:
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      Code:
+        S3:
+          Bucket: !Ref S3Bucket
+          Key: !Ref CodeCommitSourceS3Key
+      RepositoryName: !Ref CodeCommitRepositoryName
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3Bucket
+        EncryptionKey:
+          Id: !Sub arn:aws:kms:ap-northeast-1:${AWS::AccountId}:key/${KmsId}
+          Type: KMS
+      RestartExecutionOnUpdate: False
+      RoleArn: !ImportValue CodePipelineRole
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: PreBuild_SourceCode
+              Configuration:
+                RepositoryName: !Ref CodeCommitRepositoryName
+                BranchName: !Ref RepositoryBranch
+                PollForSourceChanges: "false"
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              RunOrder: 1
+              RoleArn: !Sub arn:aws:iam::${ProdAccount}:role/CrossAccountPipelineRole
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectName
+                PrimarySource: PreBuild_SourceCode
+              InputArtifacts:
+                - Name: PreBuild_SourceCode
+              OutputArtifacts:
+                - Name: PostCodeBuild_Artifact
+
+  Events:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !Sub arn:aws:codecommit:ap-northeast-1:${AWS::AccountId}:${CodeCommitRepositoryName}
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - !Ref RepositoryBranch
+          repositoryName:
+            - !Ref CodeCommitRepositoryName
+      State: ENABLED
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:ap-northeast-1:${AWS::AccountId}:${CodePipeline}
+          RoleArn: !ImportValue EventsInvokePipelineRole
+          Id: "Pipeline"
